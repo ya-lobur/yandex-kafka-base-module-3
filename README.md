@@ -1,0 +1,1 @@
+# yandex-kafka-base-module-3
