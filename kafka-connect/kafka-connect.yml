@@ -1,0 +1,34 @@
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+includeObjectNames:
+  - "kafka.connect:type=source-task-metrics,*"
+  - "kafka.connect:type=connect-worker-metrics,*"
+  - "debezium.postgres:type=connector-metrics,*"
+rules:
+  - pattern: 'kafka.connect<type=source-task-metrics, connector=(.+), task=(.+)><>source-record-(poll|write)-total'
+    name: kafka_connect_source_record_$3_total
+    type: COUNTER
+    labels:
+      connector: "$1"
+      task: "$2"
+  - pattern: 'kafka.connect<type=source-task-metrics, connector=(.+), task=(.+)><>source-record-active-count(?![-a-z])'
+    name: kafka_connect_source_record_active_count
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+  - pattern: 'kafka.connect<type=connect-worker-metrics, connector=(.+)><>connector-(running|failed)-task-count'
+    name: kafka_connect_connector_$2_task_count
+    type: GAUGE
+    labels:
+      connector: "$1"
+  - pattern: 'debezium.postgres<type=connector-metrics, context=streaming, server=(.+)><>Connected'
+    name: debezium_connected
+    type: GAUGE
+    labels:
+      server: "$1"
+  - pattern: 'debezium.postgres<type=connector-metrics, context=streaming, server=(.+)><>MilliSecondsBehindSource'
+    name: debezium_milliseconds_behind_source
+    type: GAUGE
+    labels:
+      server: "$1"

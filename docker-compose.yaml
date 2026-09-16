@@ -1,0 +1,138 @@
+name: kafka-practice-5
+
+services:
+    kafka:
+        image: confluentinc/cp-kafka:8.3.1
+        ports:
+            - "127.0.0.1:19092:9092"
+        environment:
+            CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+            KAFKA_NODE_ID: 1
+            KAFKA_PROCESS_ROLES: broker,controller
+            KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+            KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+            KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+            KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,EXTERNAL://0.0.0.0:9092
+            KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:19092
+            KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+            KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+            KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+            KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+            KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+            KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+        volumes:
+            - kafka_data:/var/lib/kafka/data
+        healthcheck:
+            test: [ "CMD-SHELL", "kafka-topics --bootstrap-server kafka:29092 --list >/dev/null 2>&1" ]
+            interval: 10s
+            timeout: 10s
+            retries: 18
+            start_period: 20s
+
+    kafka-connect:
+        build:
+            context: ./kafka-connect
+        depends_on:
+            kafka:
+                condition: service_healthy
+            postgres:
+                condition: service_healthy
+        ports:
+            - "127.0.0.1:8083:8083"
+            - "127.0.0.1:9876:9876"
+        environment:
+            CONNECT_BOOTSTRAP_SERVERS: kafka:29092
+            CONNECT_LISTENERS: http://0.0.0.0:8083
+            CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+            CONNECT_REST_ADVERTISED_PORT: 8083
+            CONNECT_REST_PORT: 8083  # Используется штатным healthcheck образа.
+            CONNECT_GROUP_ID: practice-5-connect
+            CONNECT_CONFIG_STORAGE_TOPIC: practice-5-connect-configs
+            CONNECT_OFFSET_STORAGE_TOPIC: practice-5-connect-offsets
+            CONNECT_STATUS_STORAGE_TOPIC: practice-5-connect-status
+            CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+            CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+            CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+            CONNECT_OFFSET_STORAGE_PARTITIONS: 1
+            CONNECT_STATUS_STORAGE_PARTITIONS: 1
+            CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+            CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+            CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/filestream-connectors,/usr/share/confluent-hub-components
+            CONNECT_OFFSET_FLUSH_INTERVAL_MS: 1000
+            KAFKA_OPTS: "-javaagent:/opt/jmx_prometheus_javaagent.jar=9876:/opt/kafka-connect.yml"
+
+    postgres:
+        image: postgres:17.11-bookworm
+        command: [ "postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=4", "-c", "max_replication_slots=4" ]
+        environment:
+            POSTGRES_DB: shop
+            POSTGRES_USER: postgres-user
+            POSTGRES_PASSWORD: postgres-pw
+            TZ: UTC
+        ports:
+            - "127.0.0.1:15432:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+        healthcheck:
+            test: [ "CMD-SHELL", "pg_isready -U postgres-user -d shop" ]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+
+    kafka-ui:
+        profiles: ["ui"]
+        image: ghcr.io/kafbat/kafka-ui:v1.5.0
+        depends_on:
+            kafka:
+                condition: service_healthy
+            kafka-connect:
+                condition: service_healthy
+        ports:
+            - "127.0.0.1:8080:8080"
+        environment:
+            KAFKA_CLUSTERS_0_NAME: kraft
+            KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+            KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+            KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+
+    prometheus:
+        image: prom/prometheus:v3.13.1
+        ports:
+            - "127.0.0.1:9090:9090"
+        command:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=7d
+        volumes:
+            - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+            - prometheus_data:/prometheus
+        healthcheck:
+            test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+            interval: 5s
+            timeout: 5s
+            retries: 20
+
+    grafana:
+        image: grafana/grafana:13.1.2
+        ports:
+            - "127.0.0.1:3000:3000"
+        environment:
+            GF_SECURITY_ADMIN_USER: admin
+            GF_SECURITY_ADMIN_PASSWORD: admin
+            GF_USERS_ALLOW_SIGN_UP: "false"
+        volumes:
+            - ./grafana/provisioning:/etc/grafana/provisioning:ro
+            - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+            - grafana_data:/var/lib/grafana
+        healthcheck:
+            test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+            interval: 5s
+            timeout: 5s
+            retries: 20
+
+volumes:
+    kafka_data:
+    postgres_data:
+    prometheus_data:
+    grafana_data:
